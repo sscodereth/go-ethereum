@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -700,6 +701,44 @@ func (db *Database) Journal(root common.Hash) error {
 	db.readOnly = true
 	log.Info("Stored snapshot journal in triedb", "disk", diskroot)
 	return nil
+}
+
+// Rebuild wipes all available journal from the persistent database and discard
+// all caches and diff layers. Using the given root to create a new disk layer.
+func (db *Database) Rebuild(root common.Hash) {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	rawdb.DeleteTriesJournal(db.diskdb)
+
+	// Iterate over and mark all layers stale
+	for _, layer := range db.layers {
+		switch layer := layer.(type) {
+		case *diskLayer:
+			// Layer should be inactive now, mark it as stale
+			layer.lock.Lock()
+			layer.stale = true
+			layer.lock.Unlock()
+
+		case *diffLayer:
+			// If the layer is a simple diff, simply mark as stale
+			layer.lock.Lock()
+			atomic.StoreUint32(&layer.stale, 1)
+			layer.lock.Unlock()
+
+		default:
+			panic(fmt.Sprintf("unknown layer type: %T", layer))
+		}
+	}
+	db.layers = map[common.Hash]snapshot{
+		root: &diskLayer{
+			db:     db,
+			diskdb: db.diskdb,
+			cache:  db.cleans,
+			root:   root,
+		},
+	}
+	log.Info("Rebuild triedb", "root", root)
 }
 
 // DiskDB retrieves the persistent storage backing the trie database.
