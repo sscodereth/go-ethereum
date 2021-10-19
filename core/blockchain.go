@@ -114,7 +114,9 @@ const (
 	// - Version 8
 	//  The following incompatible database changes were added:
 	//    * New scheme for contract code in order to separate the codes and trie nodes
-	BlockChainVersion uint64 = 8
+	// - Version 9
+	//    * State scheme is changed from hash based to path based.
+	BlockChainVersion uint64 = 9
 )
 
 // CacheConfig contains the configuration values for the trie caching/pruning
@@ -246,6 +248,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		Preimages: cacheConfig.Preimages,
 		Archive:   cacheConfig.TrieDirtyDisabled,
 		Fallback: func() common.Hash {
+			// Serve as the fallback for nodes just upgrades from
+			// legacy storage scheme. Resolve the state root of the
+			// most recent block with complete state as the disk layer.
 			blockHash := rawdb.ReadHeadBlockHash(db)
 			for {
 				if blockHash == (common.Hash{}) {

@@ -32,10 +32,39 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var (
+	triedbCleanHitMeter   = metrics.NewRegisteredMeter("trie/triedb/clean/hit", nil)
+	triedbCleanMissMeter  = metrics.NewRegisteredMeter("trie/triedb/clean/miss", nil)
+	triedbCleanReadMeter  = metrics.NewRegisteredMeter("trie/triedb/clean/read", nil)
+	triedbCleanWriteMeter = metrics.NewRegisteredMeter("trie/triedb/clean/write", nil)
+
+	triedbFallbackHitMeter  = metrics.NewRegisteredMeter("trie/triedb/clean/fallback/hit", nil)
+	triedbFallbackReadMeter = metrics.NewRegisteredMeter("trie/triedb/clean/fallback/read", nil)
+
+	triedbDirtyHitMeter   = metrics.NewRegisteredMeter("trie/triedb/dirty/hit", nil)
+	triedbDirtyMissMeter  = metrics.NewRegisteredMeter("trie/triedb/dirty/miss", nil)
+	triedbDirtyReadMeter  = metrics.NewRegisteredMeter("trie/triedb/dirty/read", nil)
+	triedbDirtyWriteMeter = metrics.NewRegisteredMeter("trie/triedb/dirty/write", nil)
+
+	triedbDirtyNodeHitDepthHist = metrics.NewRegisteredHistogram("trie/triedb/dirty/depth", nil, metrics.NewExpDecaySample(1028, 0.015))
+
+	triedbCommitTimeTimer  = metrics.NewRegisteredResettingTimer("trie/triedb/commit/time", nil)
+	triedbCommitNodesMeter = metrics.NewRegisteredMeter("trie/triedb/commit/nodes", nil)
+	triedbCommitSizeMeter  = metrics.NewRegisteredMeter("trie/triedb/commit/size", nil)
+
+	triedbBloomIndexTimer = metrics.NewRegisteredResettingTimer("trie/triedb/bloom/index", nil)
+	triedbBloomErrorGauge = metrics.NewRegisteredGaugeFloat64("trie/triedb/bloom/error", nil)
+
+	triedbBloomTrueHitMeter  = metrics.NewRegisteredMeter("trie/triedb/bloom/truehit", nil)
+	triedbBloomFalseHitMeter = metrics.NewRegisteredMeter("trie/triedb/bloom/falsehit", nil)
+	triedbBloomMissMeter     = metrics.NewRegisteredMeter("trie/triedb/bloom/miss", nil)
+
+	triedbDiffLayerSizeMeter = metrics.NewRegisteredMeter("trie/triedb/diff/size", nil)
+
 	// ErrSnapshotStale is returned from data accessors if the underlying snapshot
 	// layer had been invalidated due to the chain progressing forward far enough
 	// to not maintain the layer's original state.
@@ -48,10 +77,6 @@ var (
 	// errSnapshotCycle is returned if a snapshot is attempted to be inserted
 	// that forms a cycle in the snapshot tree.
 	errSnapshotCycle = errors.New("snapshot cycle")
-
-	// emptyRoot is the known root hash of an empty trie. In this package this
-	// special hash is used to represent empty layer.
-	emptyHash = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
 
 // Snapshot represents the functionality supported by a snapshot storage layer.
@@ -313,7 +338,7 @@ func NewDatabase(diskdb ethdb.KeyValueStore, config *Config) *Database {
 		cleans:   cleans,
 		layers:   make(map[common.Hash]snapshot),
 	}
-	head := loadSnapshot(diskdb, cleans, config, db)
+	head := loadSnapshot(diskdb, cleans, config)
 	for head != nil {
 		db.layers[head.Root()] = head
 		head = head.Parent()
@@ -382,7 +407,7 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, nodes map[s
 	// responsibility to avoid even attempting to insert such a snapshot.
 	root, parentRoot = convertEmpty(root), convertEmpty(parentRoot)
 	if root == parentRoot {
-		if root == emptyHash {
+		if root == emptyRoot {
 			return nil
 		}
 		return errSnapshotCycle
@@ -482,7 +507,7 @@ func (db *Database) Cap(root common.Hash, layers int) error {
 		var rebloom func(root common.Hash)
 		rebloom = func(root common.Hash) {
 			if diff, ok := db.layers[root].(*diffLayer); ok {
-				diff.origin = persisted
+				diff.rebloom(persisted)
 			}
 			for _, child := range children[root] {
 				rebloom(child)
@@ -557,6 +582,10 @@ func (db *Database) cap(diff *diffLayer, layers int) *diskLayer {
 // layer persistence should be operated in an atomic way. All updates should be
 // discarded if the whole transition if not finished.
 func diffToDisk(bottom *diffLayer, config *Config) *diskLayer {
+	defer func(start time.Time) {
+		triedbCommitTimeTimer.Update(time.Since(start))
+	}(time.Now())
+
 	var (
 		base  = bottom.parent.(*diskLayer)
 		batch = base.diskdb.NewBatch()
@@ -575,20 +604,35 @@ func diffToDisk(bottom *diffLayer, config *Config) *diskLayer {
 	// first place. A balance needs to be found to ensure that the bottom
 	// most layer is large enough to combine duplicated writes, and also
 	// the big write can be avoided.
+	var totalSize int64
 	for key, node := range bottom.nodes {
-		path, hash := DecodeInternalKey([]byte(key))
+		var (
+			blob       []byte
+			path, hash = DecodeInternalKey([]byte(key))
+		)
 		if node == nil {
 			rawdb.DeleteTrieNode(batch, path)
+			if base.cache != nil {
+				base.cache.Set([]byte(key), nil)
+			}
 		} else {
-			rawdb.WriteTrieNode(batch, path, node.rlp())
+			blob = node.rlp()
+			rawdb.WriteTrieNode(batch, path, blob)
 			if config != nil && config.Archive {
-				rawdb.WriteArchiveTrieNode(batch, hash, node.rlp())
+				rawdb.WriteArchiveTrieNode(batch, hash, blob)
+			}
+			if base.cache != nil {
+				base.cache.Set([]byte(key), blob)
 			}
 		}
 		if config != nil && config.OnCommit != nil {
-			config.OnCommit([]byte(key), node.rlp())
+			config.OnCommit([]byte(key), blob)
 		}
+		totalSize += int64(len(blob) + len(key))
 	}
+	triedbCommitSizeMeter.Mark(totalSize)
+	triedbCommitNodesMeter.Mark(int64(len(bottom.nodes)))
+
 	// Flush all the updates in the single db operation. Ensure the
 	// disk layer transition is atomic.
 	if err := batch.Write(); err != nil {
@@ -678,7 +722,6 @@ func (db *Database) Rebuild(root common.Hash) {
 	}
 	db.layers = map[common.Hash]snapshot{
 		root: &diskLayer{
-			db:     db,
 			diskdb: db.diskdb,
 			cache:  db.cleans,
 			root:   root,
@@ -795,7 +838,7 @@ func (db *Database) Config() *Config {
 // convertEmpty converts the given hash to predefined emptyHash if it's empty.
 func convertEmpty(hash common.Hash) common.Hash {
 	if hash == (common.Hash{}) {
-		return emptyHash
+		return emptyRoot
 	}
 	return hash
 }

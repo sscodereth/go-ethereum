@@ -29,7 +29,7 @@ type tracker struct {
 	deleted  map[string]struct{} // Set of deleted nodes, indexed by **storage** key
 }
 
-// newTracker initializes diff tracker.
+// newTracker initializes state diff tracker.
 func newTracker() *tracker {
 	return &tracker{
 		inserted: make(map[string]struct{}),

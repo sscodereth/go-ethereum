@@ -41,9 +41,9 @@ var (
 	bloomErrorGauge = metrics.NewRegisteredGauge("trie/bloom/error", nil)
 )
 
-// stateBloomHasher is a wrapper around a common.Hash to satisfy the interface
-// API requirements of the bloom library used. It's used to convert a unique
-// state key into a 64 bit mini hash.
+// stateBloomHasher is a wrapper around a trie node internal key to satisfy
+// the interface API requirements of the bloom library used. It's used to
+// convert a unique state key into a 64 bit mini hash.
 type stateBloomHasher []byte
 
 func (h stateBloomHasher) Write(p []byte) (n int, err error) { panic("not implemented") }

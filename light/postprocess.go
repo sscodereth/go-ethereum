@@ -137,18 +137,29 @@ type ChtIndexerBackend struct {
 	trieset              mapset.Set
 	section, sectionSize uint64
 	lastHash             common.Hash
+	trieRoot             common.Hash
 	trie                 *trie.Trie
 }
 
 // NewChtIndexer creates a Cht chain indexer
 func NewChtIndexer(db ethdb.Database, odr OdrBackend, size, confirms uint64, disablePruning bool) *core.ChainIndexer {
-	trieTable := rawdb.NewTable(db, ChtTablePrefix)
+	var (
+		trieTable = rawdb.NewTable(db, ChtTablePrefix)
+		trieset   = mapset.NewSet()
+	)
 	backend := &ChtIndexerBackend{
 		diskdb:         db,
 		odr:            odr,
 		trieTable:      trieTable,
-		triedb:         trie.NewDatabase(trieTable, &trie.Config{Cache: 1}), // Use a tiny cache only to keep memory down
-		trieset:        mapset.NewSet(),
+		triedb:         trie.NewDatabase(trieTable, &trie.Config{
+			Cache:    1,    // Use a tiny cache only to keep memory down
+			Archive:  true, // Use archive mode to store data in legacy format
+			OnCommit: func(key, val []byte) {
+				_, hash := trie.DecodeInternalKey(key)
+				trieset.Add(hash.Bytes())
+			},
+		}),
+		trieset:        trieset,
 		sectionSize:    size,
 		disablePruning: disablePruning,
 	}
@@ -188,6 +199,7 @@ func (c *ChtIndexerBackend) Reset(ctx context.Context, section uint64, lastSecti
 	}
 	var err error
 	c.trie, err = trie.New(root, c.triedb)
+	c.trieRoot = root
 
 	if err != nil && c.odr != nil {
 		err = c.fetchMissingNodes(ctx, section, root)
@@ -228,8 +240,13 @@ func (c *ChtIndexerBackend) Commit() error {
 		// Flush the triedb and track the latest trie nodes.
 		c.trieset.Clear()
 
-		//c.triedb.Commit(root, false, func(key, val []byte) { c.trieset.Add(key) })
-
+		// The force cap will trigger a disk commit internally
+		if err := c.triedb.Update(root, c.trieRoot, result.CommitTo(nil)); err != nil {
+			return err
+		}
+		if err := c.triedb.Cap(root, 0); err != nil {
+			return err
+		}
 		it := c.trieTable.NewIterator(nil, nil)
 		defer it.Release()
 
@@ -240,19 +257,21 @@ func (c *ChtIndexerBackend) Commit() error {
 		)
 		for it.Next() {
 			trimmed := bytes.TrimPrefix(it.Key(), []byte(ChtTablePrefix))
-			if ok, rawkey := rawdb.IsTrieNodeKey(trimmed); ok {
-				if !c.trieset.Contains(rawkey) {
-					rawdb.DeleteTrieNode(c.trieTable, rawkey)
-					deleted += 1
-				} else {
-					remaining += 1
-				}
+			if !c.trieset.Contains(trimmed) {
+				rawdb.DeleteTrieNode(c.trieTable, trimmed)
+				deleted += 1
+			} else {
+				remaining += 1
 			}
 		}
 		log.Debug("Prune historical CHT trie nodes", "deleted", deleted, "remaining", remaining, "elapsed", common.PrettyDuration(time.Since(t)))
 	} else {
-		//c.triedb.Update(root)
-		//c.triedb.Commit(root, false, nil)
+		if err := c.triedb.Update(root, c.trieRoot, result.CommitTo(nil)); err != nil {
+			return err
+		}
+		if err := c.triedb.Cap(root, 0); err != nil {
+			return err
+		}
 	}
 	log.Info("Storing CHT", "section", c.section, "head", fmt.Sprintf("%064x", c.lastHash), "root", fmt.Sprintf("%064x", root))
 	StoreChtRoot(c.diskdb, c.section, c.lastHash, root)
@@ -336,18 +355,29 @@ type BloomTrieIndexerBackend struct {
 	size              uint64
 	bloomTrieRatio    uint64
 	trie              *trie.Trie
+	trieRoot          common.Hash
 	sectionHeads      []common.Hash
 }
 
 // NewBloomTrieIndexer creates a BloomTrie chain indexer
 func NewBloomTrieIndexer(db ethdb.Database, odr OdrBackend, parentSize, size uint64, disablePruning bool) *core.ChainIndexer {
-	trieTable := rawdb.NewTable(db, BloomTrieTablePrefix)
+	var (
+		trieTable = rawdb.NewTable(db, BloomTrieTablePrefix)
+		trieset   = mapset.NewSet()
+	)
 	backend := &BloomTrieIndexerBackend{
 		diskdb:         db,
 		odr:            odr,
 		trieTable:      trieTable,
-		triedb:         trie.NewDatabase(trieTable, &trie.Config{Cache: 1}), // Use a tiny cache only to keep memory down
-		trieset:        mapset.NewSet(),
+		triedb:         trie.NewDatabase(trieTable, &trie.Config{
+			Cache:   1,    // Use a tiny cache only to keep memory down
+			Archive: true, // Use archive mode to store data in legacy format
+			OnCommit: func(key, val []byte) {
+				_, hash := trie.DecodeInternalKey(key)
+				trieset.Add(hash.Bytes())
+			},
+		}),
+		trieset:        trieset,
 		parentSize:     parentSize,
 		size:           size,
 		disablePruning: disablePruning,
@@ -411,6 +441,8 @@ func (b *BloomTrieIndexerBackend) Reset(ctx context.Context, section uint64, las
 	}
 	var err error
 	b.trie, err = trie.New(root, b.triedb)
+	b.trieRoot = root
+
 	if err != nil && b.odr != nil {
 		err = b.fetchMissingNodes(ctx, section, root)
 		if err == nil {
@@ -470,8 +502,13 @@ func (b *BloomTrieIndexerBackend) Commit() error {
 	if !b.disablePruning {
 		// Flush the triedb and track the latest trie nodes.
 		b.trieset.Clear()
-		//b.triedb.Commit(root, false, func(key, val []byte) { b.trieset.Add(key) })
 
+		if err := b.triedb.Update(root, b.trieRoot, result.CommitTo(nil)); err != nil {
+			return err
+		}
+		if err := b.triedb.Cap(root, 0); err != nil {
+			return err
+		}
 		it := b.trieTable.NewIterator(nil, nil)
 		defer it.Release()
 
@@ -482,18 +519,21 @@ func (b *BloomTrieIndexerBackend) Commit() error {
 		)
 		for it.Next() {
 			trimmed := bytes.TrimPrefix(it.Key(), []byte(ChtTablePrefix))
-			if ok, rawkey := rawdb.IsTrieNodeKey(trimmed); ok {
-				if !b.trieset.Contains(rawkey) {
-					rawdb.DeleteTrieNode(b.trieTable, rawkey) // TODO FIX IT
-					deleted += 1
-				} else {
-					remaining += 1
-				}
+			if !b.trieset.Contains(trimmed) {
+				rawdb.DeleteTrieNode(b.trieTable, trimmed)
+				deleted += 1
+			} else {
+				remaining += 1
 			}
 		}
 		log.Debug("Prune historical bloom trie nodes", "deleted", deleted, "remaining", remaining, "elapsed", common.PrettyDuration(time.Since(t)))
 	} else {
-		//b.triedb.Commit(root, false, nil)
+		if err := b.triedb.Update(root, b.trieRoot, result.CommitTo(nil)); err != nil {
+			return err
+		}
+		if err := b.triedb.Cap(root, 0); err != nil {
+			return err
+		}
 	}
 	sectionHead := b.sectionHeads[b.bloomTrieRatio-1]
 	StoreBloomTrieRoot(b.diskdb, b.section, sectionHead, root)
