@@ -148,16 +148,12 @@ func NewChtIndexer(db ethdb.Database, odr OdrBackend, size, confirms uint64, dis
 		trieset   = mapset.NewSet()
 	)
 	backend := &ChtIndexerBackend{
-		diskdb:         db,
-		odr:            odr,
-		trieTable:      trieTable,
-		triedb:         trie.NewDatabase(trieTable, &trie.Config{
-			Cache:    1,    // Use a tiny cache only to keep memory down
-			Archive:  true, // Use archive mode to store data in legacy format
-			OnCommit: func(key, val []byte) {
-				_, hash := trie.DecodeInternalKey(key)
-				trieset.Add(hash.Bytes())
-			},
+		diskdb:    db,
+		odr:       odr,
+		trieTable: trieTable,
+		triedb: trie.NewDatabase(trieTable, &trie.Config{
+			Cache:   1,    // Use a tiny cache only to keep memory down
+			Archive: true, // Use archive mode to store data in legacy format
 		}),
 		trieset:        trieset,
 		sectionSize:    size,
@@ -366,16 +362,12 @@ func NewBloomTrieIndexer(db ethdb.Database, odr OdrBackend, parentSize, size uin
 		trieset   = mapset.NewSet()
 	)
 	backend := &BloomTrieIndexerBackend{
-		diskdb:         db,
-		odr:            odr,
-		trieTable:      trieTable,
-		triedb:         trie.NewDatabase(trieTable, &trie.Config{
+		diskdb:    db,
+		odr:       odr,
+		trieTable: trieTable,
+		triedb: trie.NewDatabase(trieTable, &trie.Config{
 			Cache:   1,    // Use a tiny cache only to keep memory down
 			Archive: true, // Use archive mode to store data in legacy format
-			OnCommit: func(key, val []byte) {
-				_, hash := trie.DecodeInternalKey(key)
-				trieset.Add(hash.Bytes())
-			},
 		}),
 		trieset:        trieset,
 		parentSize:     parentSize,

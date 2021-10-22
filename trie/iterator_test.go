@@ -421,12 +421,12 @@ func testIteratorContinueAfterSeekError(t *testing.T, memonly bool) {
 	)
 	diskdb := memorydb.New()
 	triedb := NewDatabase(diskdb, &Config{
-		OnCommit: func(key, val []byte) {
-			hash := crypto.Keccak256Hash(val)
-			if hash == barNodeHash {
-				barNodeKey = common.CopyBytes(key)
-			}
-		},
+		//OnCommit: func(key, val []byte) {
+		//	hash := crypto.Keccak256Hash(val)
+		//	if hash == barNodeHash {
+		//		barNodeKey = common.CopyBytes(key)
+		//	}
+		//},
 	})
 	ctr, _ := New(common.Hash{}, triedb)
 	for _, val := range testdata1 {

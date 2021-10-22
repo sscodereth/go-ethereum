@@ -286,11 +286,6 @@ type Config struct {
 	// the legacy database) so the function provided can find the alternative root as
 	// the base.
 	Fallback func() common.Hash
-
-	// OnCommit is called when the in-memory trie nodes are flushed into the disk.
-	// The passed key is in **internal** key format and the val can be nil which
-	// indicates the node is deleted from the disk.
-	OnCommit func(key, val []byte)
 }
 
 // Database is a multiple-layered structure for maintaining in-memory trie nodes.
@@ -624,9 +619,6 @@ func diffToDisk(bottom *diffLayer, config *Config) *diskLayer {
 			if base.cache != nil {
 				base.cache.Set([]byte(key), blob)
 			}
-		}
-		if config != nil && config.OnCommit != nil {
-			config.OnCommit([]byte(key), blob)
 		}
 		totalSize += int64(len(blob) + len(key))
 	}
