@@ -496,7 +496,7 @@ func (b *BloomTrieIndexerBackend) Commit() error {
 			t         = time.Now()
 		)
 		for it.Next() {
-			trimmed := bytes.TrimPrefix(it.Key(), []byte(ChtTablePrefix))
+			trimmed := bytes.TrimPrefix(it.Key(), []byte(BloomTrieTablePrefix))
 			if len(trimmed) == common.HashLength {
 				if _, ok := hashes[common.BytesToHash(trimmed)]; !ok {
 					batch.Delete(trimmed)
