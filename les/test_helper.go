@@ -247,7 +247,7 @@ func newTestClientHandler(gspec core.Genesis, backend *backends.SimulatedBackend
 
 func newTestServerHandler(gspec core.Genesis, blocks int, indexers []*core.ChainIndexer, db ethdb.Database, clock mclock.Clock) (*serverHandler, *backends.SimulatedBackend, func()) {
 	var (
-		oracle *checkpointoracle.CheckpointOracle
+		oracle  *checkpointoracle.CheckpointOracle
 		genesis = gspec.MustCommit(db)
 	)
 
