@@ -314,3 +314,16 @@ func (dl *diffLayer) flatten() snapshot {
 		diffed: dl.diffed,
 	}
 }
+
+// persist persists the diff layer and all its parent diff layers to disk.
+// The order should be strictly from bottom to top.
+func (dl *diffLayer) persist(config *Config) snapshot {
+	parent, ok := dl.parent.(*diffLayer)
+	if !ok {
+		return dl.parent
+	}
+	dl.lock.Lock()
+	dl.parent = parent.persist(config)
+	dl.lock.Unlock()
+	return diffToDisk(dl, config)
+}

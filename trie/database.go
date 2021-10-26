@@ -281,6 +281,10 @@ type Config struct {
 	// All the mutations like journaling, updating disk layer will all be rejected.
 	ReadOnly bool
 
+	// NoMerge disables the diff layer merging. It's mostly used in archive node
+	// for retaining all versions of states.
+	NoMerge bool
+
 	// Fallback is the function used to find the fallback base layer root. It's pretty
 	// common that there is no singleton trie persisted in the disk(e.g. migrated from
 	// the legacy database) so the function provided can find the alternative root as
@@ -465,11 +469,15 @@ func (db *Database) Cap(root common.Hash, layers int) error {
 	// no child to rewire to the grandparent. In that case we can fake a temporary
 	// child for the capping and then remove it.
 	if layers == 0 {
-		// If full commit was requested, flatten the diffs and merge onto disk
-		diff.lock.RLock()
-		base := diffToDisk(diff.flatten().(*diffLayer), db.config)
-		diff.lock.RUnlock()
-
+		// Traverse the diff layers from bottom to top, persist them one by one
+		// if diff merging is disabled.
+		var base *diskLayer
+		if db.config != nil && db.config.NoMerge {
+			base = diff.persist(db.config).(*diskLayer)
+		} else {
+			// If full commit was requested, flatten the diffs and merge onto disk
+			base = diffToDisk(diff.flatten().(*diffLayer), db.config)
+		}
 		// Replace the entire snapshot tree with the flat base
 		db.layers = map[common.Hash]snapshot{base.root: base}
 		return nil
@@ -548,6 +556,12 @@ func (db *Database) cap(diff *diffLayer, layers int) *diskLayer {
 		diff.lock.Lock()
 		defer diff.lock.Unlock()
 
+		if db.config != nil && db.config.NoMerge {
+			base := parent.persist(db.config)
+			db.layers[base.Root()] = base
+			diff.parent = base
+			return nil
+		}
 		// Flatten the parent into the grandparent. The flattening internally obtains
 		// a write lock on grandparent.
 		flattened := parent.flatten().(*diffLayer)
@@ -562,10 +576,7 @@ func (db *Database) cap(diff *diffLayer, layers int) *diskLayer {
 	}
 	// If the bottom-most layer is larger than our memory cap, persist to disk
 	bottom := diff.parent.(*diffLayer)
-
-	bottom.lock.RLock()
 	base := diffToDisk(bottom, db.config)
-	bottom.lock.RUnlock()
 
 	db.layers[base.root] = base
 	diff.parent = base
@@ -593,6 +604,15 @@ func diffToDisk(bottom *diffLayer, config *Config) *diskLayer {
 	base.stale = true
 	base.lock.Unlock()
 
+	bottom.lock.Lock()
+	defer bottom.lock.Unlock()
+
+	// Before actually writing all our data to the disk, first ensure that the
+	// bottom layer hasn't been 'corrupted' by someone else already flattening
+	// into it
+	if atomic.SwapUint32(&bottom.stale, 1) != 0 {
+		panic("bottom diff layer is stale")
+	}
 	// Push all updated accounts into the database.
 	// TODO all the nodes belong to the same layer should be written
 	// in atomic way. However a huge disk write should be avoid in the

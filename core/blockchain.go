@@ -247,6 +247,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		Journal:     cacheConfig.TrieCleanJournal,
 		Preimages:   cacheConfig.Preimages,
 		WriteLegacy: cacheConfig.TrieDirtyDisabled,
+		NoMerge:     cacheConfig.TrieDirtyDisabled,
 		Fallback: func() common.Hash {
 			// Serve as the fallback for nodes just upgrades from
 			// legacy storage scheme. Resolve the state root of the
@@ -1031,10 +1032,8 @@ func (bc *BlockChain) Stop() {
 		}
 	}
 	// Ensure the state of recent blocks are stored to journal before exiting.
-	if !bc.cacheConfig.TrieDirtyDisabled {
-		if err := bc.stateCache.TrieDB().Journal(bc.CurrentBlock().Root()); err != nil {
-			log.Info("Failed to journal in-memory trie nodes", "err", err)
-		}
+	if err := bc.stateCache.TrieDB().Journal(bc.CurrentBlock().Root()); err != nil {
+		log.Info("Failed to journal in-memory trie nodes", "err", err)
 	}
 	// Ensure all live cached entries be saved into disk, so that we can skip
 	// cache warmup when node restarts.
@@ -1439,11 +1438,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	_, err = state.Commit(bc.chainConfig.IsEIP158(block.Number()))
 	if err != nil {
 		return NonStatTy, err
-	}
-	// Forcibly flush all committed nodes into the disk if archive mode
-	// is enabled.
-	if bc.cacheConfig.TrieDirtyDisabled {
-		state.Database().TrieDB().Cap(block.Root(), 0)
 	}
 	// If the total difficulty is higher than our known, add it to the canonical chain
 	// Second clause in the if statement reduces the vulnerability to selfish mining.
