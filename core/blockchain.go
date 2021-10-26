@@ -243,10 +243,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		vmConfig:       vmConfig,
 	}
 	bc.stateCache = state.NewDatabaseWithConfig(db, &trie.Config{
-		Cache:     cacheConfig.TrieCleanLimit,
-		Journal:   cacheConfig.TrieCleanJournal,
-		Preimages: cacheConfig.Preimages,
-		Archive:   cacheConfig.TrieDirtyDisabled,
+		Cache:       cacheConfig.TrieCleanLimit,
+		Journal:     cacheConfig.TrieCleanJournal,
+		Preimages:   cacheConfig.Preimages,
+		WriteLegacy: cacheConfig.TrieDirtyDisabled,
 		Fallback: func() common.Hash {
 			// Serve as the fallback for nodes just upgrades from
 			// legacy storage scheme. Resolve the state root of the
@@ -669,7 +669,7 @@ func (bc *BlockChain) FastSyncCommitHead(hash common.Hash) error {
 	bc.chainmu.Unlock()
 
 	// Rebuild the triedb with the given state root.
-	bc.stateCache.TrieDB().Rebuild(block.Root())
+	bc.stateCache.TrieDB().Clean(block.Root())
 
 	// Destroy any existing state snapshot and regenerate it in the background,
 	// also resuming the normal maintenance of any previously paused snapshot.
@@ -991,12 +991,6 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 		block = bc.GetBlock(block.ParentHash(), block.NumberU64()-1)
 	}
 	return uncles
-}
-
-// TrieNode retrieves a blob of data associated with a trie node
-// either from ephemeral in-memory cache, or from persistent storage.
-func (bc *BlockChain) TrieNode(hash common.Hash) ([]byte, error) {
-	return nil, errors.New("not found")
 }
 
 // ContractCode retrieves a blob of data associated with a contract hash

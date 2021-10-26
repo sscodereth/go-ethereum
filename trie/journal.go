@@ -47,7 +47,7 @@ type journalNode struct {
 
 // loadJournal tries to parse the snapshot journal from the disk.
 func loadJournal(disk ethdb.KeyValueStore, base *diskLayer) (snapshot, error) {
-	journal := rawdb.ReadTriesJournal(disk)
+	journal := rawdb.ReadTrieJournal(disk)
 	if len(journal) == 0 {
 		return nil, errMissJournal
 	}

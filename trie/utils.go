@@ -228,7 +228,7 @@ func (set *nodeSet) len() int {
 	return len(set.nodes)
 }
 
-// CommitResult wraps the trie commit result in the single struct.
+// CommitResult wraps the trie commit result in a single struct.
 type CommitResult struct {
 	Root common.Hash // The re-calculated trie root hash after commit
 

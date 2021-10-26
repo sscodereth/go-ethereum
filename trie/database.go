@@ -271,14 +271,14 @@ type Config struct {
 	Journal   string // Journal of clean cache to survive node restarts
 	Preimages bool   // Flag whether the preimage of trie key is recorded
 
-	// Archive mode indicates whether the flushed data will be stored with
+	// WriteLegacy indicates whether the flushed data will be stored with
 	// an additional piece of data according to the legacy state scheme. It's
 	// mainly used in the archive node mode which requires all historical state
 	// and storing the preserved state like genesis.
-	Archive bool
+	WriteLegacy bool
 
 	// ReadOnly mode indicates whether the database is opened in read only mode.
-	// All the mutations like journalling, updating disk layer will all be rejected.
+	// All the mutations like journaling, updating disk layer will all be rejected.
 	ReadOnly bool
 
 	// Fallback is the function used to find the fallback base layer root. It's pretty
@@ -297,7 +297,7 @@ type Config struct {
 // diffs tracked in the disk.
 type Database struct {
 	// readOnly is the flag whether the mutation is allowed to be applied.
-	// It will be set automatically when the database is journalled during
+	// It will be set automatically when the database is journaled during
 	// the shutdown to reject all following unexpected mutations.
 	readOnly      bool
 	config        *Config
@@ -613,7 +613,7 @@ func diffToDisk(bottom *diffLayer, config *Config) *diskLayer {
 		} else {
 			blob = node.rlp()
 			rawdb.WriteTrieNode(batch, path, blob)
-			if config != nil && config.Archive {
+			if config != nil && config.WriteLegacy {
 				rawdb.WriteArchiveTrieNode(batch, hash, blob)
 			}
 			if base.cache != nil {
@@ -677,7 +677,7 @@ func (db *Database) Journal(root common.Hash) error {
 		return err
 	}
 	// Store the journal into the database and return
-	rawdb.WriteTriesJournal(db.diskdb, journal.Bytes())
+	rawdb.WriteTrieJournal(db.diskdb, journal.Bytes())
 
 	// Set the db in read only mode to reject all following mutations
 	db.readOnly = true
@@ -685,15 +685,15 @@ func (db *Database) Journal(root common.Hash) error {
 	return nil
 }
 
-// Rebuild wipes all available journal from the persistent database and discard
+// Clean wipes all available journal from the persistent database and discard
 // all caches and diff layers. Using the given root to create a new disk layer.
-func (db *Database) Rebuild(root common.Hash) {
+func (db *Database) Clean(root common.Hash) {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
-	rawdb.DeleteTriesJournal(db.diskdb)
+	rawdb.DeleteTrieJournal(db.diskdb)
 
-	// Iterate over and mark all layers stale
+	// Iterate over all layers and mark them as stale
 	for _, layer := range db.layers {
 		switch layer := layer.(type) {
 		case *diskLayer:
