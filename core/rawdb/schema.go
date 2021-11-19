@@ -129,17 +129,34 @@ const (
 
 	// freezerDifficultyTable indicates the name of the freezer total difficulty table.
 	freezerDifficultyTable = "diffs"
+
+	// freezerReverseDiffTable indicates the name of the freezer reverse diff table.
+	freezerReverseDiffTable = "rdiffs"
 )
 
-// FreezerNoSnappy configures whether compression is disabled for the ancient-tables.
+// ChainFreezerNoSnappy configures whether compression is disabled for the ancient-chain-tables.
 // Hashes and difficulties don't compress well.
-var FreezerNoSnappy = map[string]bool{
+var ChainFreezerNoSnappy = map[string]bool{
 	freezerHeaderTable:     false,
 	freezerHashTable:       true,
 	freezerBodiesTable:     false,
 	freezerReceiptTable:    false,
 	freezerDifficultyTable: true,
 }
+
+// ReverseDiffFreezerNoSnappy configures whether compression is disabled for the
+// ancient reverse diffs.
+var ReverseDiffFreezerNoSnappy = map[string]bool{
+	freezerReverseDiffTable: true,
+}
+
+const (
+	// ChainFreezer indicates the name of ancient chain freezer
+	ChainFreezer = "chain"
+
+	// reverseDiffFreezer indicates the name of ancient reverse diff freezer
+	reverseDiffFreezer = "rdiff"
+)
 
 // LegacyTxLookupEntry is the legacy TxLookupEntry definition with some unnecessary
 // fields.
