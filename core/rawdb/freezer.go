@@ -254,7 +254,7 @@ func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 		if err != nil {
 			// The write operation has failed. Go back to the previous item position.
 			for name, table := range f.tables {
-				err := table.truncate(prevItem)
+				err := table.truncateHead(prevItem)
 				if err != nil {
 					log.Error("Freezer table roll-back failed", "table", name, "index", prevItem, "err", err)
 				}
@@ -286,11 +286,27 @@ func (f *freezer) TruncateAncients(items uint64) error {
 		return nil
 	}
 	for _, table := range f.tables {
-		if err := table.truncate(items); err != nil {
+		if err := table.truncateHead(items); err != nil {
 			return err
 		}
 	}
 	atomic.StoreUint64(&f.frozen, items)
+	return nil
+}
+
+// TruncateTail discards any recent data below the provided threshold number.
+func (f *freezer) TruncateTail(items uint64) error {
+	if f.readonly {
+		return errReadOnly
+	}
+	f.writeLock.Lock()
+	defer f.writeLock.Unlock()
+
+	for _, table := range f.tables {
+		if err := table.truncateTail(items); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -318,7 +334,7 @@ func (f *freezer) repair() error {
 		}
 	}
 	for _, table := range f.tables {
-		if err := table.truncate(min); err != nil {
+		if err := table.truncateHead(min); err != nil {
 			return err
 		}
 	}
