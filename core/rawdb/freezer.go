@@ -274,8 +274,8 @@ func (f *freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 	return writeSize, nil
 }
 
-// TruncateAncients discards any recent data above the provided threshold number.
-func (f *freezer) TruncateAncients(items uint64) error {
+// TruncateHead discards any recent data above the provided threshold number.
+func (f *freezer) TruncateHead(items uint64) error {
 	if f.readonly {
 		return errReadOnly
 	}

@@ -100,7 +100,7 @@ func loadReverseDiffParent(db ethdb.Database, id uint64) (common.Hash, error) {
 // storeReverseDiff extracts the reverse state diff by the passed bottom-most
 // diff layer and its parent.
 // This function will panic if it's called for non-bottom-most diff layer.
-func storeReverseDiff(dl *diffLayer) error {
+func storeReverseDiff(dl *diffLayer, limit uint64) error {
 	var (
 		startTime = time.Now()
 		base      = dl.Parent().(*diskLayer)
@@ -124,6 +124,10 @@ func storeReverseDiff(dl *diffLayer) error {
 	if err != nil {
 		return err
 	}
+	// The reverse diff object and the lookup are stored in two different
+	// place. So there is no atomicity guarantee. It's possible that reverse
+	// diff object is written but lookup is not, vice versa. So double check
+	// the presence when using the reverse diff.
 	rawdb.WriteReverseDiff(base.diskdb, dl.rid, blob)
 	rawdb.WriteReverseDiffLookup(batch, base.root, dl.rid)
 	if err := batch.Write(); err != nil {
@@ -131,6 +135,13 @@ func storeReverseDiff(dl *diffLayer) error {
 	}
 	batch.Reset()
 	triedbReverseDiffSizeMeter.Mark(int64(len(blob)))
+
+	// Prune the reverse diffs if they are too old
+	//if dl.rid < limit {
+	//	return nil
+	//}
+	//newTail := dl.rid - limit
+	//rawdb.DeleteReverseDiff(base.diskdb, newTail, false)
 
 	duration := time.Since(startTime)
 	triedbReverseDiffTimeTimer.Update(duration)

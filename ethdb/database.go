@@ -106,8 +106,12 @@ type AncientWriter interface {
 	// The integer return value is the total size of the written data.
 	ModifyAncients(typ string, fn func(AncientWriteOp) error) (int64, error)
 
-	// TruncateAncients discards all but the first n ancient data from the ancient store.
-	TruncateAncients(typ string, n uint64) error
+	// TruncateHead discards all but the first n ancient data from the ancient store.
+	TruncateHead(typ string, n uint64) error
+
+	// TruncateTail discards the first n ancient data from the ancient store. Note ancient
+	// store can only support deletion by file, so the tail deletion can be noop.
+	TruncateTail(typ string, n uint64) error
 
 	// Sync flushes all in-memory ancient store data to disk.
 	Sync(typ string) error

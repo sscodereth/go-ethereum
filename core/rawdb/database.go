@@ -119,13 +119,25 @@ func (frdb *freezerdb) ModifyAncients(typ string, fn func(ethdb.AncientWriteOp) 
 	}
 }
 
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (frdb *freezerdb) TruncateAncients(typ string, items uint64) error {
+// TruncateHead returns an error as we don't have a backing chain freezer.
+func (frdb *freezerdb) TruncateHead(typ string, items uint64) error {
 	switch typ {
 	case ChainFreezer:
-		return frdb.chain.TruncateAncients(items)
+		return frdb.chain.TruncateHead(items)
 	case reverseDiffFreezer:
-		return frdb.rdiff.TruncateAncients(items)
+		return frdb.rdiff.TruncateHead(items)
+	default:
+		return errUndefinedType
+	}
+}
+
+// TruncateTail returns an error as we don't have a backing chain freezer.
+func (frdb *freezerdb) TruncateTail(typ string, items uint64) error {
+	switch typ {
+	case ChainFreezer:
+		return frdb.chain.TruncateTail(items)
+	case reverseDiffFreezer:
+		return frdb.rdiff.TruncateTail(items)
 	default:
 		return errUndefinedType
 	}
@@ -228,8 +240,13 @@ func (db *nofreezedb) ModifyAncients(typ string, fn func(ethdb.AncientWriteOp) e
 	return 0, errNotSupported
 }
 
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (db *nofreezedb) TruncateAncients(typ string, items uint64) error {
+// TruncateHead returns an error as we don't have a backing chain freezer.
+func (db *nofreezedb) TruncateHead(typ string, items uint64) error {
+	return errNotSupported
+}
+
+// TruncateTail returns an error as we don't have a backing chain freezer.
+func (db *nofreezedb) TruncateTail(typ string, items uint64) error {
 	return errNotSupported
 }
 

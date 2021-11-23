@@ -89,10 +89,16 @@ func (t *table) ReadAncients(typ string, fn func(reader ethdb.AncientReadOp) err
 	return t.db.ReadAncients(typ, fn)
 }
 
-// TruncateAncients is a noop passthrough that just forwards the request to the underlying
+// TruncateHead is a noop passthrough that just forwards the request to the underlying
 // database.
-func (t *table) TruncateAncients(typ string, items uint64) error {
-	return t.db.TruncateAncients(typ, items)
+func (t *table) TruncateHead(typ string, items uint64) error {
+	return t.db.TruncateHead(typ, items)
+}
+
+// TruncateTail is a noop passthrough that just forwards the request to the underlying
+// database.
+func (t *table) TruncateTail(typ string, tail uint64) error {
+	return t.db.TruncateTail(typ, tail)
 }
 
 // Sync is a noop passthrough that just forwards the request to the underlying
